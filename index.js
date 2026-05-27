@@ -208,7 +208,7 @@ async function runSEOMonitor(globalKeywords = [], targetSlugs = []) {
 }
 
 // ── Commit approved pages ─────────────────────────────────────────────────────
-async function commitApproved(approvedIds, rejectedIds, snapshot) {
+async function commitApproved(approvedIds, rejectedIds, snapshot, decisions = []) {
   isCommitting = true;
   const changed  = [];
   const rejected = [];
@@ -221,17 +221,29 @@ async function commitApproved(approvedIds, rejectedIds, snapshot) {
   const skipped = meta.skipped || [];
   const items   = snapshot || pendingApprovals;
 
+  // Build a quick lookup for per-section decisions
+  const decisionMap = {};
+  for (const d of decisions) decisionMap[d.id] = d;
+
   for (const item of items) {
-    if (approvedIds.includes(item.id)) {
+    const dec = decisionMap[item.id] || {};
+    // Fallback: if no granular decision, use the old approvedIds list
+    const approveSeo = dec.approveSeo !== undefined ? dec.approveSeo : approvedIds.includes(item.id);
+    const approveAlt = dec.approveAlt !== undefined ? dec.approveAlt : approvedIds.includes(item.id);
+    const anyApproved = approveSeo || approveAlt;
+
+    if (anyApproved) {
       try {
-        // Apply SEO meta changes
-        if (item.analysis.needsChange) {
+        // Apply SEO meta changes — only if SEO section approved
+        if (approveSeo && item.analysis.needsChange) {
           await wp.updateSEO(item.postId, item.postType, item.analysis.newTitle, item.analysis.newMetaDesc);
-          addLog(`  ✓ SEO meta updated in WordPress: ${item.filePath}`, "success");
+          addLog(`  ✓ SEO meta updated: ${item.filePath}`, "success");
+        } else if (!approveSeo && item.analysis.needsChange) {
+          addLog(`  ⏭ SEO meta skipped: ${item.filePath}`, "info");
         }
 
-        // Apply image alt text fixes
-        if (item.imageFixes && item.imageFixes.length > 0) {
+        // Apply image alt text fixes — only if alt section approved
+        if (approveAlt && item.imageFixes && item.imageFixes.length > 0) {
           let altApplied = 0;
           for (const fix of item.imageFixes) {
             if (fix.attachmentId) {
@@ -243,9 +255,9 @@ async function commitApproved(approvedIds, rejectedIds, snapshot) {
               }
             }
           }
-          if (altApplied > 0) {
-            addLog(`  ✓ Updated alt text on ${altApplied} image(s): ${item.filePath}`, "success");
-          }
+          if (altApplied > 0) addLog(`  ✓ Alt text updated on ${altApplied} image(s): ${item.filePath}`, "success");
+        } else if (!approveAlt && item.imageFixes && item.imageFixes.length > 0) {
+          addLog(`  ⏭ Image alt text skipped: ${item.filePath}`, "info");
         }
 
         changed.push({
@@ -254,6 +266,8 @@ async function commitApproved(approvedIds, rejectedIds, snapshot) {
           oldTitle: item.oldTitle,
           oldMeta:  item.oldMeta,
           analysis: item.analysis,
+          approveSeo,
+          approveAlt,
           imageFixes:          item.imageFixes || [],
           compressionResults:  item.compressionResults || [],
         });
@@ -359,12 +373,14 @@ app.post("/api/approve", (req, res) => {
 
   const approvedIds = Array.isArray(req.body?.approved) ? req.body.approved : [];
   const rejectedIds = Array.isArray(req.body?.rejected) ? req.body.rejected : [];
+  // Granular per-section decisions: [{ id, approveSeo, approveAlt }]
+  const decisions   = Array.isArray(req.body?.decisions) ? req.body.decisions : [];
 
   const snapshot   = [...pendingApprovals];
   pendingApprovals = [];
   approvalRunMeta  = null;
 
-  commitApproved(approvedIds, rejectedIds, snapshot).catch(console.error);
+  commitApproved(approvedIds, rejectedIds, snapshot, decisions).catch(console.error);
   res.json({ status: "committing", message: `Committing ${approvedIds.length} approved change(s) to WordPress...` });
 });
 
@@ -453,12 +469,24 @@ app.get("/", (req, res) => {
   .approval-title { font-size: 13px; font-weight: 700; font-family: 'Space Mono', monospace; text-transform: uppercase; letter-spacing: .1em; color: var(--warn); margin-bottom: 4px; }
   .approval-subtitle { font-size: 12px; color: var(--muted); font-family: 'Space Mono', monospace; margin-bottom: 18px; }
   .approval-item { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 12px; transition: border-color .2s; }
-  .approval-image-section { margin-top: 10px; padding: 10px 12px; background: rgba(124,92,252,.06); border: 1px solid rgba(124,92,252,.15); border-radius: 8px; }
-  .approval-image-title { font-size: 11px; font-family: 'Space Mono', monospace; color: var(--accent); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; }
-  .approval-image-row { display: grid; grid-template-columns: 140px 1fr 1fr; gap: 8px; font-size: 11px; margin-bottom: 6px; align-items: start; }
-  .approval-image-src { font-family: 'Space Mono', monospace; color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-top: 2px; }
   .approval-item.approved { border-color: var(--success); }
   .approval-item.skipped { border-color: var(--border); opacity: .6; }
+  .approval-image-row { display: grid; grid-template-columns: 140px 1fr 1fr; gap: 8px; font-size: 11px; margin-bottom: 6px; align-items: start; }
+  .approval-image-src { font-family: 'Space Mono', monospace; color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-top: 2px; }
+
+  /* Section-level approve/skip blocks */
+  .section-block { margin-top: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; transition: border-color .2s, background .2s; }
+  .section-block.section-approved { border-color: var(--success); background: rgba(0,229,176,.04); }
+  .section-block.section-skipped  { border-color: var(--border); opacity: .55; }
+  .section-block-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .section-block-label { font-size: 11px; font-weight: 700; font-family: 'Space Mono', monospace; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
+  .section-btns { display: flex; gap: 6px; }
+  .btn-section-approve { padding: 5px 14px; font-size: 11px; font-weight: 700; font-family: 'Space Mono', monospace; border-radius: 6px; border: 1px solid var(--success); background: rgba(0,229,176,.08); color: var(--success); cursor: pointer; transition: all .15s; }
+  .btn-section-approve:hover  { background: rgba(0,229,176,.18); }
+  .btn-section-approve.selected { background: var(--success); color: #000; }
+  .btn-section-skip { padding: 5px 14px; font-size: 11px; font-weight: 700; font-family: 'Space Mono', monospace; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; transition: all .15s; }
+  .btn-section-skip:hover { border-color: var(--error); color: var(--error); }
+  .btn-section-skip.selected { background: rgba(255,77,109,.1); border-color: var(--error); color: var(--error); }
   .approval-file { font-size: 12px; font-family: 'Space Mono', monospace; color: var(--accent); margin-bottom: 12px; }
   .approval-row { display: grid; grid-template-columns: 72px 1fr 1fr; gap: 10px; font-size: 12px; margin-bottom: 6px; align-items: start; }
   .approval-label { font-family: 'Space Mono', monospace; color: var(--muted); font-size: 11px; text-transform: uppercase; padding-top: 2px; }
@@ -559,7 +587,7 @@ app.get("/", (req, res) => {
 
   <div class="approval-panel" id="approval-panel">
     <div class="approval-title">⏳ Review AI Suggestions</div>
-    <div class="approval-subtitle">Approve changes to publish them to WordPress, or skip to ignore.</div>
+    <div class="approval-subtitle">Each section (SEO meta, image alt text) can be approved or skipped independently.</div>
     <div id="approval-items"></div>
     <div class="approval-commit-bar">
       <button class="btn-commit" id="commit-btn" onclick="submitApprovals()" disabled>
