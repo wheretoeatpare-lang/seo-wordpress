@@ -193,12 +193,7 @@ function maybeRenderApprovalPanel(pending) {
       '</div>';
     }
 
-    // ── Compression note ──────────────────────────────────────────────────────
-    if (p.compressionCount > 0) {
-      html += '<div style="font-size:11px;color:var(--success);font-family:\'Space Mono\',monospace;margin-top:8px;padding:6px 10px;background:rgba(0,229,176,.07);border-radius:6px">' +
-        '📦 ' + p.compressionCount + ' image(s) already compressed &amp; re-uploaded' +
-      '</div>';
-    }
+    // Compression runs separately via dedicated button — not shown here
 
     div.innerHTML = html;
     itemsEl.appendChild(div);

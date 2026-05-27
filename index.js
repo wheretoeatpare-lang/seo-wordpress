@@ -133,27 +133,8 @@ async function runSEOMonitor(globalKeywords = [], targetSlugs = []) {
           }
         }
 
-        // ── Image Compression ──────────────────────────────────────────────────
+        // Compression removed from scan loop — use the dedicated compress button instead
         let compressionResults = [];
-        if (process.env.ENABLE_IMAGE_COMPRESS === "true") {
-          try {
-            const htmlContent = post.content?.rendered || "";
-            const attachmentIds = ImageCompressor.extractAttachmentIds(htmlContent);
-            if (attachmentIds.length > 0) {
-              addLog(`  📦 Compressing ${attachmentIds.length} image(s)...`, "info");
-              compressionResults = await compressor.compressMany(attachmentIds, (msg) => addLog(msg, "info"));
-              const compressed = compressionResults.filter(r => !r.skipped && !r.error);
-              if (compressed.length > 0) {
-                const totalSaved = compressed.reduce((sum, r) => sum + r.savedBytes, 0);
-                addLog(`  📦 Compressed ${compressed.length} image(s), saved ~${_formatBytes(totalSaved)}`, "success");
-              } else {
-                addLog(`  📦 No images needed compression (all below 15% savings threshold)`, "info");
-              }
-            }
-          } catch (err) {
-            addLog(`  ⚠ Compression failed: ${err.message}`, "warn");
-          }
-        }
 
         if (analysis.needsChange || imageFixes.length > 0) {
           pendingApprovals.push({
