@@ -155,8 +155,8 @@ function maybeRenderApprovalPanel(pending) {
         '<div class="section-block-header">' +
           '<span class="section-block-label">📝 SEO Meta</span>' +
           '<div class="section-btns">' +
-            '<button class="btn-section-approve" id="btn-seo-approve-' + p.id + '" onclick="decideSection('' + p.id + '','seo','approved')">✓ Apply</button>' +
-            '<button class="btn-section-skip" id="btn-seo-skip-' + p.id + '" onclick="decideSection('' + p.id + '','seo','skipped')">✗ Skip</button>' +
+            '<button class="btn-section-approve" id="btn-seo-approve-' + p.id + '" onclick="decideSection(\'' + p.id + '\',\'seo\',\'approved\')">✓ Apply</button>' +
+            '<button class="btn-section-skip" id="btn-seo-skip-' + p.id + '" onclick="decideSection(\'' + p.id + '\',\'seo\',\'skipped\')">✗ Skip</button>' +
           '</div>' +
         '</div>' +
         '<div class="approval-row">' +
@@ -179,8 +179,8 @@ function maybeRenderApprovalPanel(pending) {
         '<div class="section-block-header">' +
           '<span class="section-block-label">🖼 Image Alt Text (' + p.imageFixes.length + ' fix' + (p.imageFixes.length > 1 ? 'es' : '') + ')</span>' +
           '<div class="section-btns">' +
-            '<button class="btn-section-approve" id="btn-alt-approve-' + p.id + '" onclick="decideSection('' + p.id + '','alt','approved')">✓ Apply</button>' +
-            '<button class="btn-section-skip" id="btn-alt-skip-' + p.id + '" onclick="decideSection('' + p.id + '','alt','skipped')">✗ Skip</button>' +
+            '<button class="btn-section-approve" id="btn-alt-approve-' + p.id + '" onclick="decideSection(\'' + p.id + '\',\'alt\',\'approved\')">✓ Apply</button>' +
+            '<button class="btn-section-skip" id="btn-alt-skip-' + p.id + '" onclick="decideSection(\'' + p.id + '\',\'alt\',\'skipped\')">✗ Skip</button>' +
           '</div>' +
         '</div>' +
         p.imageFixes.map(function(f) {
