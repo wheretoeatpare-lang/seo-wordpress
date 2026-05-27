@@ -4,6 +4,8 @@ const cron = require("node-cron");
 const WordPressClient = require("./wordpressClient");
 const SEOChecker = require("./seoChecker");
 const EmailReporter = require("./emailReporter");
+const ImageAltChecker = require("./imageAltChecker");
+const ImageCompressor = require("./imageCompressor");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -30,7 +32,13 @@ const wp = new WordPressClient(
   process.env.WP_USERNAME,
   process.env.WP_APP_PASSWORD
 );
-const seoChecker = new SEOChecker();
+const seoChecker    = new SEOChecker();
+const altChecker    = new ImageAltChecker();
+const compressor    = new ImageCompressor(
+  process.env.WP_SITE_URL,
+  process.env.WP_USERNAME,
+  process.env.WP_APP_PASSWORD
+);
 const mailer = new EmailReporter(
   process.env.EMAIL_FROM,
   process.env.EMAIL_TO,
@@ -108,20 +116,63 @@ async function runSEOMonitor(globalKeywords = [], targetSlugs = []) {
           seo.title, seo.metaDesc, seo.url, pageText, globalKeywords
         );
 
-        if (analysis.needsChange) {
+        // ── Image Alt Text Check ────────────────────────────────────────────────
+        let imageFixes = [];
+        if (process.env.ENABLE_IMAGE_ALT !== "false") {
+          try {
+            addLog(`  Checking image alt text...`, "info");
+            imageFixes = await altChecker.analyzePost(post, seo.title, pageText, globalKeywords);
+            if (imageFixes.length > 0) {
+              addLog(`  🖼 ${imageFixes.length} image(s) need alt text`, "warn");
+            } else {
+              addLog(`  🖼 All image alt texts look good`, "info");
+            }
+          } catch (err) {
+            addLog(`  ⚠ Alt text check failed: ${err.message}`, "warn");
+          }
+        }
+
+        // ── Image Compression ──────────────────────────────────────────────────
+        let compressionResults = [];
+        if (process.env.ENABLE_IMAGE_COMPRESS === "true") {
+          try {
+            const htmlContent = post.content?.rendered || "";
+            const attachmentIds = ImageCompressor.extractAttachmentIds(htmlContent);
+            if (attachmentIds.length > 0) {
+              addLog(`  📦 Compressing ${attachmentIds.length} image(s)...`, "info");
+              compressionResults = await compressor.compressMany(attachmentIds, (msg) => addLog(msg, "info"));
+              const compressed = compressionResults.filter(r => !r.skipped && !r.error);
+              if (compressed.length > 0) {
+                const totalSaved = compressed.reduce((sum, r) => sum + r.savedBytes, 0);
+                addLog(`  📦 Compressed ${compressed.length} image(s), saved ~${_formatBytes(totalSaved)}`, "success");
+              } else {
+                addLog(`  📦 No images needed compression (all below 15% savings threshold)`, "info");
+              }
+            }
+          } catch (err) {
+            addLog(`  ⚠ Compression failed: ${err.message}`, "warn");
+          }
+        }
+
+        if (analysis.needsChange || imageFixes.length > 0) {
           pendingApprovals.push({
             id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             postId:   seo.id,
             postType: seo.postType,
-            filePath: `[${seo.postType}] ${seo.slug}`, // used by email reporter as "filePath"
+            filePath: `[${seo.postType}] ${seo.slug}`,
             url:      seo.url,
             oldTitle: seo.title,
             oldMeta:  seo.metaDesc,
             newTitle: analysis.newTitle,
             newMeta:  analysis.newMetaDesc,
+            imageFixes,
+            compressionResults,
             analysis,
           });
-          addLog(`  ⏳ Needs approval: "${analysis.newTitle}"`, "warn");
+          const changeTypes = [];
+          if (analysis.needsChange) changeTypes.push("SEO meta");
+          if (imageFixes.length > 0)  changeTypes.push(`${imageFixes.length} image alt(s)`);
+          addLog(`  ⏳ Needs approval: ${changeTypes.join(" + ")}`, "warn");
         } else {
           skipped.push({ filePath: `[${seo.postType}] ${seo.slug}`, url: seo.url });
           addLog(`  ✓ SEO is good — no changes needed`, "success");
@@ -172,15 +223,40 @@ async function commitApproved(approvedIds, rejectedIds, snapshot) {
   for (const item of items) {
     if (approvedIds.includes(item.id)) {
       try {
-        await wp.updateSEO(item.postId, item.postType, item.analysis.newTitle, item.analysis.newMetaDesc);
+        // Apply SEO meta changes
+        if (item.analysis.needsChange) {
+          await wp.updateSEO(item.postId, item.postType, item.analysis.newTitle, item.analysis.newMetaDesc);
+          addLog(`  ✓ SEO meta updated in WordPress: ${item.filePath}`, "success");
+        }
+
+        // Apply image alt text fixes
+        if (item.imageFixes && item.imageFixes.length > 0) {
+          let altApplied = 0;
+          for (const fix of item.imageFixes) {
+            if (fix.attachmentId) {
+              try {
+                await wp.updateImageAlt(fix.attachmentId, fix.newAlt);
+                altApplied++;
+              } catch (altErr) {
+                addLog(`  ⚠ Alt update failed for attachment ${fix.attachmentId}: ${altErr.message}`, "warn");
+              }
+            }
+          }
+          if (altApplied > 0) {
+            addLog(`  ✓ Updated alt text on ${altApplied} image(s): ${item.filePath}`, "success");
+          }
+        }
+
         changed.push({
           filePath: item.filePath,
           url:      item.url,
           oldTitle: item.oldTitle,
           oldMeta:  item.oldMeta,
           analysis: item.analysis,
+          imageFixes:          item.imageFixes || [],
+          compressionResults:  item.compressionResults || [],
         });
-        addLog(`  ✓ Updated in WordPress: ${item.filePath}`, "success");
+        addLog(`  ✓ Done: ${item.filePath}`, "success");
       } catch (err) {
         addLog(`  ✗ WP update failed for ${item.filePath}: ${err.message}`, "error");
         errors.push({ file: item.filePath, error: err.message });
@@ -218,6 +294,11 @@ async function commitApproved(approvedIds, rejectedIds, snapshot) {
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function _formatBytes(bytes) {
+  if (bytes < 1024)         return `${bytes}B`;
+  if (bytes < 1024 * 1024)  return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)}MB`;
+}
 
 // ── API Routes ────────────────────────────────────────────────────────────────
 app.use(express.json());
@@ -256,6 +337,15 @@ app.get("/api/status", (req, res) => {
       basisMeta:   p.analysis.basisMeta,
       titleOk:     p.analysis.titleOk,
       metaOk:      p.analysis.metaOk,
+      // Image features
+      imageAltCount:  (p.imageFixes || []).length,
+      imageFixes:     (p.imageFixes || []).map(f => ({
+        src:        f.src,
+        currentAlt: f.currentAlt,
+        newAlt:     f.newAlt,
+        reason:     f.reason,
+      })),
+      compressionCount: (p.compressionResults || []).filter(r => !r.skipped && !r.error).length,
     })),
   });
 });
@@ -362,6 +452,10 @@ app.get("/", (req, res) => {
   .approval-title { font-size: 13px; font-weight: 700; font-family: 'Space Mono', monospace; text-transform: uppercase; letter-spacing: .1em; color: var(--warn); margin-bottom: 4px; }
   .approval-subtitle { font-size: 12px; color: var(--muted); font-family: 'Space Mono', monospace; margin-bottom: 18px; }
   .approval-item { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 12px; transition: border-color .2s; }
+  .approval-image-section { margin-top: 10px; padding: 10px 12px; background: rgba(124,92,252,.06); border: 1px solid rgba(124,92,252,.15); border-radius: 8px; }
+  .approval-image-title { font-size: 11px; font-family: 'Space Mono', monospace; color: var(--accent); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; }
+  .approval-image-row { display: grid; grid-template-columns: 140px 1fr 1fr; gap: 8px; font-size: 11px; margin-bottom: 6px; align-items: start; }
+  .approval-image-src { font-family: 'Space Mono', monospace; color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-top: 2px; }
   .approval-item.approved { border-color: var(--success); }
   .approval-item.skipped { border-color: var(--border); opacity: .6; }
   .approval-file { font-size: 12px; font-family: 'Space Mono', monospace; color: var(--accent); margin-bottom: 12px; }

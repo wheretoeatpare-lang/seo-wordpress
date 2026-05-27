@@ -77,6 +77,25 @@ class WordPressClient {
     return _stripTags(raw).replace(/\s+/g, " ").trim().slice(0, 500);
   }
 
+  // ── Update alt text on a media attachment ────────────────────────────────────
+  async updateImageAlt(attachmentId, newAlt) {
+    await this.client.post(`/media/${attachmentId}`, {
+      alt_text: newAlt,
+    });
+  }
+
+  // ── Get all media attachments for a post (by post parent) ────────────────────
+  async getPostMedia(postId) {
+    try {
+      const res = await this.client.get(`/media`, {
+        params: { parent: postId, per_page: 50, _fields: "id,source_url,alt_text,mime_type" },
+      });
+      return res.data;
+    } catch {
+      return [];
+    }
+  }
+
   // ── Apply new SEO fields back to WordPress ────────────────────────────────────
   async updateSEO(id, postType, newTitle, newMetaDesc) {
     let payload = {};

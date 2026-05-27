@@ -150,6 +150,27 @@ function maybeRenderApprovalPanel(pending) {
         '<div class="approval-new">' + escapeHtml(p.newMeta) + '</div>' +
       '</div>' +
 
+      // Image alt text section
+      (p.imageFixes && p.imageFixes.length > 0 ? (
+        '<div class="approval-image-section">' +
+          '<div class="approval-image-title">🖼 Image Alt Text (' + p.imageFixes.length + ' fix' + (p.imageFixes.length > 1 ? 'es' : '') + ')</div>' +
+          p.imageFixes.map(function(f) {
+            return '<div class="approval-image-row">' +
+              '<div class="approval-image-src">' + escapeHtml(f.src.split('/').pop()) + '</div>' +
+              '<div class="approval-old">' + escapeHtml(f.currentAlt || '(no alt text)') + '</div>' +
+              '<div class="approval-new">' + escapeHtml(f.newAlt) + '</div>' +
+            '</div>';
+          }).join('') +
+        '</div>'
+      ) : '') +
+
+      // Compression summary
+      (p.compressionCount > 0 ? (
+        '<div style="font-size:11px;color:var(--success);font-family:\'Space Mono\',monospace;margin-top:8px;padding:6px 10px;background:rgba(0,229,176,.07);border-radius:6px">' +
+          '📦 ' + p.compressionCount + ' image(s) compressed &amp; re-uploaded automatically' +
+        '</div>'
+      ) : '') +
+
       (reasonText ? '<div class="approval-reason">' + escapeHtml(reasonText) + '</div>' : '') +
 
       '<div class="approval-actions">' +
