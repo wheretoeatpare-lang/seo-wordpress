@@ -21,7 +21,7 @@ app.use((req, res, next) => {
     const [user, pass] = Buffer.from(base64, "base64").toString().split(":");
     if (user === DASHBOARD_USER && pass === DASHBOARD_PASS) return next();
   }
-  res.set("WWW-Authenticate", 'Basic realm="SEO Monitor — Private"');
+  res.set("WWW-Authenticate", 'Basic realm="SEO Monitor"');
   res.status(401).send("Access denied. Please log in.");
 });
 
