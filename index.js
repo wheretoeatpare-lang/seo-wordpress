@@ -94,8 +94,9 @@ async function runSEOMonitor(globalKeywords = [], targetSlugs = []) {
     let allPosts = await wp.getAllPages();
 
     if (targetSlugs.length > 0) {
-      allPosts = allPosts.filter(p => targetSlugs.includes(p.slug));
-      addLog(`Filtered to ${allPosts.length} targeted post(s)`, "info");
+      const cleanSlugs = targetSlugs.map(s => s.replace(/^\/+|\/+$/g, "").trim().toLowerCase());
+      allPosts = allPosts.filter(p => cleanSlugs.includes(p.slug.toLowerCase()));
+      addLog(`Filtered to ${allPosts.length} targeted post(s) (looking for: ${cleanSlugs.join(", ")})`, "info");
     }
 
     for (const postStub of allPosts) {
