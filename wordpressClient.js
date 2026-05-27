@@ -5,6 +5,9 @@ const SEO_PLUGIN = process.env.WP_SEO_PLUGIN || "yoast"; // "yoast" | "rankmath"
 
 class WordPressClient {
   constructor(siteUrl, username, appPassword) {
+    if (!siteUrl)      throw new Error("Missing env var: WP_SITE_URL");
+    if (!username)     throw new Error("Missing env var: WP_USERNAME");
+    if (!appPassword)  throw new Error("Missing env var: WP_APP_PASSWORD");
     this.siteUrl = siteUrl.replace(/\/$/, "");
     this.client = axios.create({
       baseURL: `${this.siteUrl}/wp-json/wp/v2`,
