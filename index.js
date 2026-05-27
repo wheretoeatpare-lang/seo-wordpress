@@ -10,6 +10,21 @@ const PORT = process.env.PORT || 3000;
 const SITE_URL = process.env.WP_SITE_URL || process.env.SITE_URL || "https://yoursite.com";
 const API_SECRET = process.env.API_SECRET || "seo-bot-secret";
 
+// ── Basic Auth — protects entire dashboard ────────────────────────────────────
+const DASHBOARD_USER = process.env.DASHBOARD_USER || "admin";
+const DASHBOARD_PASS = process.env.DASHBOARD_PASS || "changeme";
+
+app.use((req, res, next) => {
+  const authHeader = req.headers["authorization"];
+  if (authHeader) {
+    const base64 = authHeader.split(" ")[1] || "";
+    const [user, pass] = Buffer.from(base64, "base64").toString().split(":");
+    if (user === DASHBOARD_USER && pass === DASHBOARD_PASS) return next();
+  }
+  res.set("WWW-Authenticate", 'Basic realm="SEO Monitor — Private"');
+  res.status(401).send("Access denied. Please log in.");
+});
+
 const wp = new WordPressClient(
   process.env.WP_SITE_URL,
   process.env.WP_USERNAME,
